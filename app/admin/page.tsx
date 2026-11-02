@@ -1,137 +1,41 @@
 'use client'
-
-import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import {
-  ArrowUpRight,
-  CalendarDays,
-  ChevronDown,
-  CircleDollarSign,
-  Clock3,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  MoreHorizontal,
-  Users,
-  WalletCards,
-} from 'lucide-react'
+import { useState } from 'react'
+import useSWR from 'swr'
+import { LayoutDashboard, Users, WalletCards, Plus, Clock3, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { AccessNotice, useAccess } from '@/components/access'
+import EmployeeForm from '@/components/employee-form'
 import { createClient } from '@/lib/supabase/client'
-
+import { loadEmployees, loadPunches } from '@/lib/data'
+import { localDate, money, payroll, days, type Employee } from '@/lib/payroll'
 type View = 'dashboard' | 'employees' | 'payroll'
-
-type Employee = {
-  initials: string
-  name: string
-  role: string
-  salary: number
-  status: 'Présente' | 'Absente'
-  hours: string
-  accent: string
+const navigation = [{id:'dashboard',label:'Dashboard',icon:LayoutDashboard},{id:'employees',label:'Employées',icon:Users},{id:'payroll',label:'Paie',icon:WalletCards}] as const
+export default function Admin() {
+ const {ready,message}=useAccess()
+ const [view,setView]=useState<View>('dashboard'), [month,setMonth]=useState(localDate().slice(0,7))
+ const [editing,setEditing]=useState<Employee | 'new' | null>(null), [busy,setBusy]=useState(false), [notice,setNotice]=useState('')
+ const {data:employees=[],error:employeeError,isLoading,mutate}=useSWR(ready?'admin-employees':null,loadEmployees)
+ const {data:events=[],error:eventError,isLoading:eventsLoading,mutate:refreshPunches}=useSWR(ready?['punches',month]:null,()=>loadPunches(month),{refreshInterval:30000})
+ const active=employees.filter(e=>e.active)
+ const rows=employees.filter(e=>e.start_date<=month+'-31' && (!e.end_date || e.end_date>=month+'-01')).map(employee=>({employee,...payroll(employee,events,month)}))
+ const unavailable=!ready || isLoading || eventsLoading || !!employeeError || !!eventError
+ const total=rows.reduce((s,r)=>s+r.amount,0), hours=rows.reduce((s,r)=>s+r.worked,0)/60
+ async function archive(employee: Employee) {
+  if(!window.confirm(`Retirer ${employee.full_name} de l’équipe active ? Ses pointages et son historique seront conservés.`)) return
+  setBusy(true);setNotice('')
+  try {const {error}=await createClient().from('employees').update({active:false,end_date:employee.start_date>localDate()?employee.start_date:localDate()}).eq('id',employee.id).select('id').single();if(error)throw error;await mutate();setNotice('Employée retirée de l’équipe active.')} catch {setNotice('Suppression impossible. Vérifiez les droits Supabase.')}finally{setBusy(false)}
+ }
+ async function logout(){try{await createClient().auth.signOut();window.location.href='/admin/login'}catch{setNotice('Déconnexion impossible. Réessayez.')}}
+ return <main className="min-h-screen bg-[#f7f7f8] text-[#191919] lg:flex">
+ <aside className="border-b bg-white p-5 lg:fixed lg:inset-y-0 lg:w-60 lg:border-r"><a href="/" className="mb-8 flex items-center gap-3 text-lg font-semibold"><span className="grid size-10 place-items-center rounded-xl bg-black text-white">A</span>Atelier</a><p className="mb-3 text-xs uppercase tracking-widest text-gray-400">Administration</p><nav className="flex gap-2 lg:flex-col">{navigation.map(n=><button key={n.id} onClick={()=>{setView(n.id);setEditing(null);setNotice('')}} className={`flex items-center gap-3 rounded-xl p-3 text-sm ${view===n.id?'bg-gray-100 font-semibold':'text-gray-500 hover:bg-gray-50'}`}><n.icon size={18}/>{n.label}</button>)}</nav><a href="/employee" className="mt-8 flex items-center gap-3 p-3 text-sm text-gray-500"><Clock3 size={18}/>Ouvrir la pointeuse</a>{ready&&<button onClick={logout} className="flex items-center gap-3 p-3 text-sm text-gray-500"><LogOut size={18}/>Se déconnecter</button>}</aside>
+ <section className="min-w-0 flex-1 lg:ml-60"><header className="flex flex-wrap items-center justify-between gap-3 border-b bg-white px-6 py-5"><span className="text-sm text-gray-500">Votre agence, au quotidien</span><label className="flex items-center gap-3 text-sm">Mois<input type="month" required value={month} onChange={e=>{if(/^\d{4}-\d{2}$/.test(e.target.value))setMonth(e.target.value)}} className="rounded-lg border p-2"/></label></header>
+ <div className="mx-auto max-w-6xl space-y-6 p-5 sm:p-8 lg:p-10">
+ {!ready&&<AccessNotice message={message}/>}
+ {(employeeError||eventError)&&<div role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-800">Chargement impossible. Vérifiez que le schéma Supabase est installé et que le compte a le rôle admin.<Button variant="outline" className="ml-3" onClick={()=>{void mutate();void refreshPunches()}}>Réessayer</Button></div>}
+ {(isLoading||eventsLoading)&&<p role="status">Chargement…</p>}{notice&&<p role="status" className="rounded-xl bg-white p-4 text-sm">{notice}</p>}
+ <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-widest text-gray-400">{view==='payroll'?'Finances':view==='employees'?'Équipe':'Vue d’ensemble'}</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">{view==='dashboard'?'Votre activité':view==='employees'?'Employées':'Paie du mois'}</h1></div>{view==='employees'&&<Button disabled={!ready||!!employeeError||isLoading} onClick={()=>setEditing('new')}><Plus/>Ajouter une employée</Button>}</div>
+ {view==='dashboard'&&<><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[['Employées actives',String(active.length)],['Heures pointées',hours.toFixed(1)+' h'],['Paie acquise',money(total)],['Jours d’absence',String(rows.reduce((s,r)=>s+r.absenceDays,0))]].map(([label,value])=><div key={label} className="rounded-2xl border border-black/5 bg-white p-6"><p className="text-sm text-gray-500">{label}</p><p className="mt-5 text-3xl font-semibold tracking-tight">{unavailable?'—':value}</p><p className="mt-2 text-xs text-gray-400">{label==='Employées actives'?'Équipe actuelle':month}</p></div>)}</div><div className="rounded-2xl border bg-white p-6"><h2 className="font-semibold">Suivi des pointages</h2><p className="mt-3 text-sm text-gray-500">{unavailable?'Les indicateurs apparaîtront après connexion.':`${rows.reduce((s,r)=>s+r.incomplete,0)} journée(s) avec un pointage incomplet. Les journées futures ne sont pas comptées comme absences.`}</p><Button className="mt-5" variant="outline" onClick={()=>setView('payroll')}>Consulter le détail de la paie</Button></div></>}
+ {view==='employees'&&<>{editing&&<EmployeeForm key={editing==='new'?'new':editing.id} employee={editing==='new'?undefined:editing} onCancel={()=>setEditing(null)} onSaved={async()=>{await mutate();setEditing(null);setNotice('Employée enregistrée.')}}/>}<div className="divide-y overflow-hidden rounded-2xl border bg-white">{active.length===0&&<p className="p-8 text-sm text-gray-500">{ready&&!isLoading&&!employeeError?'Aucune employée. Ajoutez votre première employée.':'La liste apparaîtra après connexion.'}</p>}{active.map(e=><div key={e.id} className="space-y-4 p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">{e.full_name}</h2><p className="mt-1 text-sm text-gray-500">{e.role||'Fonction non renseignée'} · {money(Number(e.monthly_salary))} / mois</p></div><div className="flex gap-2"><Button variant="outline" disabled={busy} onClick={()=>setEditing(e)}>Modifier</Button><Button variant="destructive" disabled={busy} onClick={()=>archive(e)}>Supprimer</Button></div></div><div className="flex flex-wrap gap-2">{e.schedule.map((s,i)=>s.enabled&&<span key={i} className="rounded-lg bg-gray-50 px-3 py-2 text-xs">{days[i]} · {s.start} – {s.end}</span>)}</div></div>)}</div></>}
+ {view==='payroll'&&<><div className="rounded-2xl border bg-white p-5 text-sm text-gray-600"><p className="font-medium text-gray-900">Salaire acquis = salaire mensuel × heures validées ÷ heures prévues dans le mois</p><p className="mt-2">Les pauses et le temps hors planning ne sont pas payés. Les jours de repos sont exclus. Les absences et retards réduisent automatiquement le montant. Le mois en cours reste provisoire.</p></div><div className="overflow-x-auto rounded-2xl border bg-white"><table className="w-full whitespace-nowrap text-left text-sm"><thead className="bg-gray-50 text-xs text-gray-500"><tr>{['Employée','Salaire mensuel','Prévues','Pointées','Manquantes¹','Absences','À vérifier','Acquis'].map(h=><th key={h} className="p-4 font-medium">{h}</th>)}</tr></thead><tbody>{!unavailable&&rows.map(r=><tr key={r.employee.id} className="border-t"><td className="p-4 font-medium">{r.employee.full_name}{!r.employee.active&&<span className="block text-xs text-gray-400">Archivée</span>}</td><td className="p-4">{money(Number(r.employee.monthly_salary))}</td><td className="p-4">{(r.planned/60).toFixed(1)} h</td><td className="p-4">{(r.worked/60).toFixed(1)} h</td><td className="p-4">{(r.missing/60).toFixed(1)} h</td><td className="p-4">{r.absenceDays} j</td><td className="p-4 text-amber-700">{r.incomplete>0?`${r.incomplete} pointage(s)`:r.planned===0?'Planning absent':'—'}</td><td className="p-4 font-semibold">{money(r.amount)}</td></tr>)}</tbody></table>{(unavailable||rows.length===0)&&<p className="p-8 text-sm text-gray-500">{unavailable?'Données indisponibles pour le moment.':'Aucune employée sur cette période.'}</p>}</div><p className="text-xs text-gray-500">¹ Heures manquantes sur les journées terminées uniquement. Les pointages incomplets doivent être vérifiés avant paiement. Ce montant ne comprend ni cotisations, ni congés payés, ni heures supplémentaires.</p><div className="rounded-2xl bg-[#191919] p-6 text-white"><p className="text-sm text-white/60">Total acquis · {month}</p><p className="mt-2 text-3xl font-semibold">{unavailable?'—':money(total)}</p></div></>}
+ </div></section></main>
 }
-
-const employees: Employee[] = [
-  { initials: 'SM', name: 'Sophie Martin', role: 'Responsable beauté', salary: 2450, status: 'Présente', hours: '08:42', accent: 'bg-[#e8d9cf]' },
-  { initials: 'CL', name: 'Camille Laurent', role: 'Esthéticienne', salary: 1980, status: 'Présente', hours: '08:31', accent: 'bg-[#dbe2eb]' },
-  { initials: 'NA', name: 'Nina Abdou', role: 'Coiffeuse', salary: 2100, status: 'Absente', hours: '—', accent: 'bg-[#e6dfcf]' },
-  { initials: 'EM', name: 'Emma Morel', role: 'Manucure', salary: 1850, status: 'Présente', hours: '09:04', accent: 'bg-[#ddd8e7]' },
-]
-
-const navItems: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'employees', label: 'Employées', icon: Users },
-  { id: 'payroll', label: 'Paie', icon: WalletCards },
-]
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(value)
-}
-
-export default function Page() {
-  const router = useRouter()
-  const [view, setView] = useState<View>('dashboard')
-  useEffect(() => { createClient().auth.getUser().then(({ data }) => { if (!data.user) router.replace('/admin/login') }) }, [router])
-  const [mobileNav, setMobileNav] = useState(false)
-  const [month, setMonth] = useState('Octobre 2024')
-
-  const totalPayroll = useMemo(() => employees.reduce((sum, employee) => sum + employee.salary, 0), [])
-
-  return (
-    <main className="min-h-screen bg-[#f7f7f8] text-[#191919]">
-      <div className="flex min-h-screen">
-        <aside className={`${mobileNav ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-20 w-[252px] flex-col border-r border-black/[0.06] bg-white px-5 py-6 lg:flex`}>
-          <div className="flex items-center gap-3 px-2">
-            <div className="grid size-9 place-items-center rounded-xl bg-[#191919] text-sm font-semibold text-white">A</div>
-            <div>
-              <p className="text-[15px] font-semibold tracking-[-0.02em]">Atelier</p>
-              <p className="text-xs text-[#8a8a8f]">Espace admin</p>
-            </div>
-          </div>
-          <div className="mt-12 flex flex-1 flex-col">
-            <p className="px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#a0a0a5]">Menu principal</p>
-            <nav className="mt-3 flex flex-col gap-1">
-              {navItems.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => { setView(id); setMobileNav(false) }} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${view === id ? 'bg-[#f1f1f2] font-medium text-[#191919]' : 'text-[#77777c] hover:bg-[#f7f7f8] hover:text-[#191919]'}`}>
-                  <Icon className="size-[17px]" strokeWidth={1.8} />
-                  {label}
-                  {id === 'employees' && <span className="ml-auto rounded-full bg-[#e9e9eb] px-2 py-0.5 text-[10px] text-[#77777c]">12</span>}
-                </button>
-              ))}
-            </nav>
-            <div className="mt-auto border-t border-black/[0.06] pt-5">
-              <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#77777c] hover:bg-[#f7f7f8]"><LogOut className="size-[17px]" strokeWidth={1.8} />Se déconnecter</button>
-            </div>
-          </div>
-        </aside>
-
-        <section className="flex min-w-0 flex-1 flex-col lg:ml-[252px]">
-          <header className="flex h-[76px] items-center justify-between border-b border-black/[0.06] bg-white/80 px-5 backdrop-blur-xl sm:px-8 lg:px-12">
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileNav(true)} aria-label="Ouvrir le menu"><Menu /></Button>
-              <p className="text-sm text-[#77777c]">Bonjour, <span className="font-medium text-[#191919]">Louenes</span></p>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="hidden items-center gap-2 rounded-lg border border-black/[0.08] bg-white px-3 py-2 text-xs text-[#68686d] sm:flex"><CalendarDays className="size-3.5" />{month}<ChevronDown className="size-3.5" /></div>
-              <div className="grid size-9 place-items-center rounded-full bg-[#d6e2d6] text-xs font-semibold text-[#415541]">LM</div>
-            </div>
-          </header>
-
-          <div className="mx-auto w-full max-w-[1320px] flex-1 px-5 py-8 sm:px-8 lg:px-12 lg:py-12">
-            {view === 'dashboard' && <Dashboard employees={employees} totalPayroll={totalPayroll} setView={setView} />}
-            {view === 'employees' && <Employees employees={employees} />}
-            {view === 'payroll' && <Payroll employees={employees} totalPayroll={totalPayroll} />}
-          </div>
-        </section>
-      </div>
-    </main>
-  )
-}
-
-function PageHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
-  return <div className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-[#96969b]">{eyebrow}</p><h1 className="text-[30px] font-semibold tracking-[-0.045em] sm:text-[36px]">{title}</h1><p className="mt-2 text-sm text-[#77777c]">{description}</p></div>{action}</div>
-}
-
-function Dashboard({ employees, totalPayroll, setView }: { employees: Employee[]; totalPayroll: number; setView: (view: View) => void }) {
-  return <>
-    <PageHeading eyebrow="Vue d'ensemble" title="Votre activité" description="Suivez les présences et la paie de votre agence." action={<Button onClick={() => setView('employees')} className="rounded-xl bg-[#191919] px-4 text-xs text-white hover:bg-[#333]">Gérer les employées <ArrowUpRight data-icon="inline-end" /></Button>} />
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <Kpi icon={Users} label="Employées actives" value="12" note="+2 ce mois-ci" positive />
-      <Kpi icon={Clock3} label="Présence aujourd'hui" value="91,7 %" note="11 sur 12 présentes" positive />
-      <Kpi icon={CircleDollarSign} label="Paie estimée" value={formatCurrency(totalPayroll)} note="Octobre 2024" />
-      <Kpi icon={CalendarDays} label="Heures ce mois" value="1 248 h" note="+6,4 % vs septembre" positive />
-    </div>
-    <div className="mt-8 grid gap-5 xl:grid-cols-[1.35fr_1fr]">
-      <section className="rounded-2xl border border-black/[0.06] bg-white p-5 sm:p-6"><div className="flex items-start justify-between"><div><h2 className="text-[15px] font-semibold">Présences de la semaine</h2><p className="mt-1 text-xs text-[#929297]">Taux de présence quotidien</p></div><Button variant="ghost" size="icon-sm" aria-label="Plus d'options"><MoreHorizontal /></Button></div><div className="mt-8 flex h-[190px] items-end justify-between gap-3 px-2">{[['Lun','82%'],['Mar','94%'],['Mer','88%'],['Jeu','100%'],['Ven','91%'],['Sam','64%'],['Dim','0%']].map(([day, value], index) => <div key={day} className="flex h-full flex-1 flex-col items-center justify-end gap-3"><div className="flex h-full w-full max-w-[42px] items-end rounded-lg bg-[#f4f4f5]"><div className={`w-full rounded-lg ${index === 6 ? 'bg-[#ededee]' : 'bg-[#191919]'}`} style={{ height: value }} /></div><span className="text-[11px] text-[#96969b]">{day}</span></div>)}</div></section>
-      <section className="rounded-2xl border border-black/[0.06] bg-white p-5 sm:p-6"><div className="flex items-start justify-between"><div><h2 className="text-[15px] font-semibold">État des présences</h2><p className="mt-1 text-xs text-[#929297]">Aujourd'hui, 24 octobre</p></div><Button variant="ghost" size="sm" onClick={() => setView('employees')} className="text-xs text-[#77777c]">Voir tout</Button></div><div className="mt-6 flex flex-col gap-4">{employees.slice(0, 4).map(employee => <EmployeeRow key={employee.name} employee={employee} />)}</div></section>
-    </div>
-    <section className="mt-5 rounded-2xl border border-black/[0.06] bg-white p-5 sm:p-6"><div className="flex items-center justify-between"><div><h2 className="text-[15px] font-semibold">Résumé de la paie</h2><p className="mt-1 text-xs text-[#929297]">Estimation basée sur les pointages du mois</p></div><Button variant="outline" size="sm" onClick={() => setView('payroll')} className="rounded-lg text-xs">Détails de la paie <ArrowUpRight data-icon="inline-end" /></Button></div><div className="mt-6 grid gap-6 sm:grid-cols-3"><div><p className="text-xs text-[#929297]">Total estimé</p><p className="mt-1 text-2xl font-semibold tracking-[-0.04em]">{formatCurrency(totalPayroll)}</p></div><div><p className="text-xs text-[#929297]">Jours travaillés</p><p className="mt-1 text-2xl font-semibold tracking-[-0.04em]">264 <span className="text-sm font-normal text-[#929297]">/ 288</span></p></div><div><p className="text-xs text-[#929297]">Absences déduites</p><p className="mt-1 text-2xl font-semibold tracking-[-0.04em]">{formatCurrency(328)} <span className="text-sm font-normal text-[#929297]">ce mois</span></p></div></div></section>
-  </>
-}
-
-function Kpi({ icon: Icon, label, value, note, positive }: { icon: typeof Users; label: string; value: string; note: string; positive?: boolean }) { return <div className="rounded-2xl border border-black/[0.06] bg-white p-5"><div className="flex items-center justify-between"><p className="text-xs text-[#89898e]">{label}</p><Icon className="size-4 text-[#9b9ba0]" strokeWidth={1.8} /></div><p className="mt-5 text-[26px] font-semibold tracking-[-0.05em]">{value}</p><p className={`mt-1 text-xs ${positive ? 'text-[#68836a]' : 'text-[#9b9ba0]'}`}>{note}</p></div> }
-
-function EmployeeRow({ employee }: { employee: Employee }) { return <div className="flex items-center gap-3"><div className={`grid size-9 shrink-0 place-items-center rounded-full ${employee.accent} text-[10px] font-semibold text-[#505056]`}>{employee.initials}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{employee.name}</p><p className="mt-0.5 text-xs text-[#99999e]">{employee.role}</p></div><div className="text-right"><span className={`rounded-full px-2 py-1 text-[10px] font-medium ${employee.status === 'Présente' ? 'bg-[#eaf3e9] text-[#658267]' : 'bg-[#f5eeee] text-[#9a6d6d]'}`}>{employee.status}</span><p className="mt-1 text-[11px] text-[#99999e]">{employee.hours}</p></div></div> }
-
-function Employees({ employees }: { employees: Employee[] }) { return <><PageHeading eyebrow="Équipe" title="Employées" description="Gérez les salaires, horaires et informations de votre équipe." action={<Button className="rounded-xl bg-[#191919] px-4 text-xs text-white hover:bg-[#333]">Ajouter une employée</Button>} /><section className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white"><div className="flex items-center justify-between border-b border-black/[0.06] px-5 py-4"><p className="text-sm font-medium">Toutes les employées <span className="ml-1 text-xs text-[#99999e]">12</span></p><Button variant="outline" size="sm" className="text-xs">Filtrer <ChevronDown data-icon="inline-end" /></Button></div><div className="divide-y divide-black/[0.06]">{employees.map(employee => <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center" key={employee.name}><div className="flex flex-1 items-center gap-3"><div className={`grid size-10 place-items-center rounded-full ${employee.accent} text-xs font-semibold text-[#505056]`}>{employee.initials}</div><div><p className="text-sm font-medium">{employee.name}</p><p className="mt-1 text-xs text-[#99999e]">{employee.role}</p></div></div><div className="grid grid-cols-2 gap-8 sm:grid-cols-3"><div><p className="text-[10px] uppercase tracking-wider text-[#aaaab0]">Salaire</p><p className="mt-1 text-sm font-medium">{formatCurrency(employee.salary)}<span className="text-xs font-normal text-[#99999e]"> / mois</span></p></div><div><p className="text-[10px] uppercase tracking-wider text-[#aaaab0]">Planning</p><p className="mt-1 text-sm">Lun — Sam</p></div><div className="hidden sm:block"><p className="text-[10px] uppercase tracking-wider text-[#aaaab0]">Statut</p><p className="mt-1 text-sm text-[#68836a]">Actif</p></div></div><Button variant="ghost" size="icon-sm" aria-label={`Options pour ${employee.name}`}><MoreHorizontal /></Button></div>)}</div></section></> }
-
-function Payroll({ employees, totalPayroll }: { employees: Employee[]; totalPayroll: number }) { return <><PageHeading eyebrow="Finances" title="Paie" description="Calculez automatiquement les salaires selon les pointages." action={<Button className="rounded-xl bg-[#191919] px-4 text-xs text-white hover:bg-[#333]">Exporter le récapitulatif</Button>} /><div className="grid gap-4 sm:grid-cols-3"><Kpi icon={CircleDollarSign} label="Total à payer" value={formatCurrency(totalPayroll - 328)} note="Après déductions" /><Kpi icon={Users} label="Employées" value="12" note="Ce mois-ci" /><Kpi icon={Clock3} label="Absences" value="4" note="Jours déduits" /></div><section className="mt-8 overflow-hidden rounded-2xl border border-black/[0.06] bg-white"><div className="border-b border-black/[0.06] px-5 py-4"><h2 className="text-sm font-medium">Détail des salaires — Octobre 2024</h2></div><div className="divide-y divide-black/[0.06]">{employees.map(employee => <div className="flex items-center gap-3 px-5 py-4" key={employee.name}><div className={`grid size-9 place-items-center rounded-full ${employee.accent} text-[10px] font-semibold text-[#505056]`}>{employee.initials}</div><div className="flex-1"><p className="text-sm font-medium">{employee.name}</p><p className="mt-0.5 text-xs text-[#99999e]">{employee.status === 'Absente' ? '1 absence déduite automatiquement' : 'Pointage conforme'}</p></div><div className="text-right"><p className="text-sm font-semibold">{formatCurrency(employee.status === 'Absente' ? employee.salary - 82 : employee.salary)}</p><p className="mt-0.5 text-xs text-[#99999e]">Net estimé</p></div></div>)}</div></section></> }
