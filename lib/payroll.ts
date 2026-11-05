@@ -3,9 +3,9 @@ export type Employee = { id: string; full_name: string; role: string | null; mon
 export type Punch = { id: string; employee_id: string; event_type: 'debut' | 'pause' | 'retour' | 'sortie'; event_at: string }
 export const days = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi']
 export const emptySchedule = (): Shift[] => days.map(() => ({ enabled: false, start: '09:00', end: '18:00' }))
-export function localDate(date = new Date()) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Casablanca', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date) }
+export function localDate(date = new Date()) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Algiers', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date) }
 export function minute(time: string) { const [h, m] = time.split(':').map(Number); return h * 60 + m }
-function eventMinute(event: Punch) { return minute(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Casablanca', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(event.event_at))) }
+function eventMinute(event: Punch) { return minute(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Algiers', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(event.event_at))) }
 export const money = (n: number) => new Intl.NumberFormat('fr-DZ', { style: 'currency', currency: 'DZD' }).formatToParts(n).map(part => part.type === 'currency' ? 'DA' : part.value).join('')
 export function payroll(employee: Employee, events: Punch[], month: string, today = localDate()) {
   let planned = 0, elapsed = 0, worked = 0, absenceDays = 0, incomplete = 0, completedWorked = 0

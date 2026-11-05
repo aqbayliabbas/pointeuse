@@ -1,0 +1,13 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import ExcelJS from 'exceljs'
+import {monthlyReport,csvContent,excelBuffer} from '../lib/attendance-export.ts'
+import {payroll,emptySchedule} from '../lib/payroll.ts'
+const schedule=emptySchedule();schedule[1]={enabled:true,start:'09:00',end:'17:00'}
+const employee={id:'one',full_name:'Émilie / équipe',role:null,monthly_salary:1000,start_date:'2026-01-01',end_date:null,active:true,schedule}
+function event(type,time){const d=new Date(`2026-11-02T${time}:00Z`);const offset=new Intl.DateTimeFormat('en',{timeZone:'Africa/Algiers',timeZoneName:'shortOffset'}).formatToParts(d).find(p=>p.type==='timeZoneName').value;return {id:type+time,employee_id:'one',event_type:type,event_at:new Date(d.getTime()-Number(offset.replace('GMT','')||0)*3600000).toISOString()}}
+const events=[event('debut','08:00'),event('pause','12:00'),event('retour','13:00'),event('sortie','18:00')]
+test('daily report includes all days, pauses, cumulative and payroll reconciliation',()=>{const r=monthlyReport(employee,events,'2026-11','2026-12-01');assert.equal(r.rows.length,30);assert.equal(r.rows[1].worked,540);assert.equal(r.rows[1].paid,420);assert.equal(r.rows.at(-1).cumulative,540);assert.equal(r.paidTotal,payroll(employee,events,'2026-11','2026-12-01').worked);assert.match(r.rows[1].punches,/Pause 12:00/);assert.equal(r.rows[8].status,'Absence')})
+test('CSV protects formula-like names, quotes and accents',()=>{const r=monthlyReport({...employee,full_name:'=1+1;"É"'},events,'2026-11');const csv=csvContent([r]);assert.ok(csv.startsWith('\uFEFF'));assert.ok(csv.includes('"\'=1+1;""É"""'));assert.ok(csv.includes('TOTAL'))})
+test('Excel roundtrip keeps distinct employee sheets and durations over 24h',async()=>{const r=monthlyReport(employee,events,'2026-11','2026-12-01');r.total=3000;const r2={...r,employee:{...employee,id:'two'}};const b=await excelBuffer([r,r2],'2026-11');const book=new ExcelJS.Workbook();await book.xlsx.load(b);assert.equal(book.worksheets.length,2);assert.notEqual(book.worksheets[0].name,book.worksheets[1].name);assert.ok(!book.worksheets[0].name.includes('/'));assert.equal(book.worksheets[0].getCell('E35').value.toISOString(),'1900-01-01T02:00:00.000Z');assert.equal(book.worksheets[0].getCell('E35').numFmt,'[h]:mm');assert.equal(book.worksheets[0].getCell('D6').value,r.rows[1].punches)})
+test('leap month and unfinished interval',()=>{assert.equal(monthlyReport(employee,[],'2028-02').rows.length,29);const r=monthlyReport(employee,[events[0]],'2026-11','2026-12-01');assert.equal(r.rows[1].status,'Pointage incomplet');assert.equal(r.total,0)})

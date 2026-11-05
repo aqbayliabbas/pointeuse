@@ -5,7 +5,7 @@ const schedule=emptySchedule();schedule[1]={enabled:true,start:'09:00',end:'17:0
 const employee={id:'e',full_name:'Test',role:null,monthly_salary:4000,schedule,start_date:'2026-11-01',end_date:null,active:true}
 function stamp(time,day) {
  const base=new Date('2026-11-'+day+'T'+time+':00Z')
- const offset=new Intl.DateTimeFormat('en',{timeZone:'Africa/Casablanca',timeZoneName:'shortOffset'}).formatToParts(base).find(p=>p.type==='timeZoneName').value
+ const offset=new Intl.DateTimeFormat('en',{timeZone:'Africa/Algiers',timeZoneName:'shortOffset'}).formatToParts(base).find(p=>p.type==='timeZoneName').value
  const hours=Number(offset.replace('GMT','')||0)
  return new Date(base.getTime()-hours*3600000).toISOString()
 }
@@ -20,5 +20,7 @@ test('unfinished day flagged without invented hours',()=>{const r=calc([punch('d
 test('zero schedule yields finite zero',()=>{const r=calc([],undefined,{...employee,schedule:emptySchedule()});assert.equal(r.amount,0);assert.equal(r.planned,0)})
 test('hire mid-month prorates against full month',()=>{const r=calc([punch('debut','09:00','30'),punch('sortie','17:00','30')],undefined,{...employee,start_date:'2026-11-30'});assert.equal(r.amount,800);assert.equal(r.absenceDays,0)})
 test('archived employee retains earned pay without future absence',()=>{const r=calc([punch('debut','09:00'),punch('sortie','17:00')],undefined,{...employee,active:false,end_date:'2026-11-02'});assert.equal(r.amount,800);assert.equal(r.absenceDays,0)})
-test('Casablanca day is independent of machine timezone',()=>{const previous=process.env.TZ; try {process.env.TZ='Pacific/Honolulu';assert.equal(localDate(new Date(stamp('00:30','02'))),'2026-11-02')} finally {if(previous)process.env.TZ=previous;else delete process.env.TZ}})
+test('Algerian day is independent of machine timezone',()=>{const previous=process.env.TZ; try {process.env.TZ='Pacific/Honolulu';assert.equal(localDate(new Date(stamp('00:30','02'))),'2026-11-02')} finally {if(previous)process.env.TZ=previous;else delete process.env.TZ}})
 test('duplicate starts do not double count and are flagged',()=>{const r=calc([punch('debut','09:00'),punch('debut','10:00'),punch('sortie','17:00')]);assert.equal(r.worked,480);assert.equal(r.incomplete,1)})
+
+test('Algerian timezone uses UTC+1 at midnight',()=>{assert.equal(localDate(new Date('2026-11-02T23:30:00Z')),'2026-11-03');assert.equal(new Intl.DateTimeFormat('en-GB',{timeZone:'Africa/Algiers',hour:'2-digit',minute:'2-digit'}).format(new Date('2026-11-03T07:33:00Z')),'08:33')})

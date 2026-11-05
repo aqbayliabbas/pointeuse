@@ -54,13 +54,13 @@ drop trigger if exists validate_employee on public.employees;
 create trigger validate_employee before insert or update on public.employees for each row execute function public.validate_employee();
 create or replace function public.record_punch(p_employee_id uuid, p_event_type text) returns public.attendance_events
 language plpgsql security definer set search_path = '' as $$
-declare last_type text; result public.attendance_events; today date := (now() at time zone 'Africa/Casablanca')::date;
+declare last_type text; result public.attendance_events; today date := (now() at time zone 'Africa/Algiers')::date;
 begin
  if not public.is_admin() then raise exception 'Accès refusé'; end if;
  -- Lock the employee to serialize simultaneous punches.
  perform 1 from public.employees where id=p_employee_id and active and start_date<=today and (end_date is null or end_date>=today) for update;
  if not found then raise exception 'Employée inactive ou introuvable'; end if;
- select event_type into last_type from public.attendance_events where employee_id=p_employee_id and (event_at at time zone 'Africa/Casablanca')::date=today order by event_at desc limit 1;
+ select event_type into last_type from public.attendance_events where employee_id=p_employee_id and (event_at at time zone 'Africa/Algiers')::date=today order by event_at desc limit 1;
  if not ((last_type is null and p_event_type='debut') or (last_type in ('debut','retour') and p_event_type in ('pause','sortie')) or (last_type='pause' and p_event_type in ('retour','sortie'))) or p_event_type not in ('debut','pause','retour','sortie') or p_event_type is null then
  raise exception 'Action incompatible avec le dernier pointage';
  end if;
