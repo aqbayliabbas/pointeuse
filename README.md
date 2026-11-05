@@ -60,3 +60,5 @@ Le formulaire de correction permet de cocher **Jour férié** et de saisir une n
 
 ## Fuseau horaire algérien
 Tous les horaires utilisent Africa/Algiers (UTC+1). Pour une base déjà installée, exécutez supabase/algeria-timezone.sql dans SQL Editor : ce script actualise les fonctions de pointage/correction et les notes sans déplacer les horodatages existants. Les dates locales et calculs seront relus dans le fuseau algérien.
+
+La journée actuelle peut également être corrigée avec **Modifier cette journée**. Une entrée ou pause sans sortie est acceptée pour continuer le pointage ensuite. Les heures futures sont refusées. Réexécutez supabase/attendance-corrections.sql pour actualiser cette règle côté Supabase.

@@ -31,7 +31,7 @@ returns void language plpgsql security definer set search_path='' as $$
 declare old_details jsonb; new_details jsonb; original jsonb; expected jsonb; saved jsonb; entry jsonb; previous_type text := null; previous_time text := ''; event_time timestamptz; valid boolean;
 begin
  if not public.is_admin() or auth.uid() is null then raise exception 'Accès refusé'; end if;
- if p_date is null or p_date >= (now() at time zone 'Africa/Algiers')::date then raise exception 'Choisissez une journée passée'; end if;
+ if p_date is null or p_date > (now() at time zone 'Africa/Algiers')::date then raise exception 'Choisissez aujourd’hui ou une journée passée'; end if;
  if p_reason is null or length(trim(p_reason))=0 or length(p_reason)>500 then raise exception 'Motif de correction requis (500 caractères maximum)'; end if;
  if jsonb_typeof(p_entries) is distinct from 'array' or jsonb_typeof(p_expected) is distinct from 'array' then raise exception 'Pointages invalides'; end if;
  if jsonb_array_length(p_entries)>100 then raise exception 'Trop de pointages'; end if;
@@ -52,10 +52,11 @@ begin
  valid := (previous_type is null and entry->>'event_type'='debut') or (previous_type in ('debut','retour') and entry->>'event_type' in ('pause','sortie')) or (previous_type='pause' and entry->>'event_type' in ('retour','sortie'));
  if valid is distinct from true then raise exception 'Ordre des pointages invalide'; end if;
  event_time := (p_date + (entry->>'time')::time) at time zone 'Africa/Algiers';
+ if event_time>clock_timestamp() then raise exception 'Un pointage ne peut pas être situé dans le futur'; end if;
  if to_char(event_time at time zone 'Africa/Algiers','HH24:MI')<>entry->>'time' then raise exception 'Heure inexistante lors du changement horaire'; end if;
  previous_type:=entry->>'event_type'; previous_time:=entry->>'time';
  end loop;
- if jsonb_array_length(p_entries)>0 and previous_type<>'sortie' then raise exception 'Une sortie est requise'; end if;
+ if p_date < (now() at time zone 'Africa/Algiers')::date and jsonb_array_length(p_entries)>0 and previous_type<>'sortie' then raise exception 'Une sortie est requise'; end if;
  delete from public.attendance_events where employee_id=p_employee_id and (event_at at time zone 'Africa/Algiers')::date=p_date;
  insert into public.attendance_events(employee_id,event_type,event_at)
  select p_employee_id, e->>'event_type', (p_date + (e->>'time')::time) at time zone 'Africa/Algiers' from jsonb_array_elements(p_entries) as e;
